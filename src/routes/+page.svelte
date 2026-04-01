@@ -28,7 +28,7 @@
   const allUsers = await getAllUsers()
   for (const user of allUsers) {
     // await migrateToOnList(user.uid, false)    
-    await migrateTemplatesToV2(user.uid, false)
+    // await migrateTemplatesToV2(user.uid, false)
     console.log('user.email =', user.email)
   }
 }}>
