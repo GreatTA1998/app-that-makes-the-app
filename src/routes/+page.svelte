@@ -5,6 +5,7 @@
     migrateTemplatesToV2
   } from '$lib/db/scripts.js'
   import Analytics from '$lib/Analytics.svelte'
+  import ErrorLogs from '$lib/ErrorLogs.svelte'
 
   async function getAllUsers () {
     return getFirestoreCollection('/users')
@@ -13,6 +14,8 @@
 
 <div class="p-4 space-y-6 text-[15px] text-neutral-900">
   <Analytics />
+
+  <ErrorLogs />
 
   <section class="space-y-2">
     <h1 class="text-lg font-semibold tracking-tight">Database migration principles</h1>
