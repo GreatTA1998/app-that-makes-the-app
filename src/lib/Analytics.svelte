@@ -10,7 +10,7 @@
     dateISO: string
     count: number
   }
-  type SnapshotRunResult = { users: number; totalTasks: number; dateISO: string }
+  type SnapshotRunResult = { users: number; totalTasks: number; dau: number; dateISO: string }
 
   // Header label budget. 8 chars + ellipsis fits a lot of columns; bump if you
   // have long local-parts that collide.
@@ -113,7 +113,7 @@
   </button>
   {#if lastRun}
     <span class="text-neutral-500">
-      Last run: {lastRun.users} users, {lastRun.totalTasks} tasks ({lastRun.dateISO})
+      Last run: {lastRun.users} users, {lastRun.totalTasks} tasks, {lastRun.dau} active ({lastRun.dateISO})
     </span>
   {/if}
   {#if runError}

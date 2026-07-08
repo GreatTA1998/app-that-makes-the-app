@@ -5,6 +5,9 @@
     migrateTemplatesToV2
   } from '$lib/db/scripts.js'
   import Analytics from '$lib/Analytics.svelte'
+  import CohortAnalytics from '$lib/CohortAnalytics.svelte'
+  import DailyActiveUsers from '$lib/DailyActiveUsers.svelte'
+  import UserInspector from '$lib/UserInspector.svelte'
   import ErrorLogs from '$lib/ErrorLogs.svelte'
 
   async function getAllUsers () {
@@ -13,7 +16,16 @@
 </script>
 
 <div class="p-4 space-y-6 text-[15px] text-neutral-900">
-  <Analytics />
+  <!-- <Analytics /> -->
+
+  <!-- 2-column quadrant grid: CohortAnalytics renders as display:contents, so
+       its layer-cake and conversion subsections flow in as their own cells. -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6 items-start">
+    <DailyActiveUsers />
+    <CohortAnalytics />
+  </div>
+
+  <UserInspector />
 
   <ErrorLogs />
 

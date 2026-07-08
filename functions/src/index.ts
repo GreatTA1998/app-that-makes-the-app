@@ -1,22 +1,39 @@
 /**
- * Daily snapshot of per-user task counts.
+ * Daily analytics snapshot. Runs once per day (00:00 UTC) and also on demand.
  *
- * Reads every user in `users/{uid}`, runs a Firestore count() aggregation on
- * `users/{uid}/tasks`, and writes the result to
- * `analytics/{uid}/taskCounts/{YYYY-MM-DD}`. The user's email is denormalised
- * onto each record so the Analytics view doesn't need to read `users` itself.
+ * Reads every Firebase Auth user (source of truth for email, creationTime and
+ * lastRefreshTime — no Firestore reads needed) and writes three things:
  *
- * Exposed via two triggers backed by the same `runTaskCountSnapshot` worker:
- *   - `dailyTaskCountSnapshot` — scheduled, runs once a day at 00:00 UTC.
- *   - `runTaskCountSnapshotNow` — callable, invoked from the web app via
- *     `httpsCallable(functions, 'runTaskCountSnapshotNow')`.
+ *   1. analytics/{uid}/taskCounts/{YYYY-MM-DD}
+ *      Per-user daily task count. Converted users only.
  *
- * Both use the Admin SDK so they bypass Firestore security rules, which is
- * what we want for an admin-only analytics job.
+ *   2. analytics/{uid}
+ *      One profile doc per user: uid, email, cohort, lastRefreshedAt,
+ *      taskCount, taskCountChange (day-over-day delta vs yesterday's
+ *      snapshot, null when there is none). Powers the per-user admin page.
+ *      Converted users only.
+ *
+ *   3. analyticsMonthly/{YYYY-MM}   (one merged write per run)
+ *      - dailyActive.{date}: DAU for each day of the month
+ *      - activeUids.{uid}: cohort — distinct users active that month (layer cake)
+ *      - conversionByCohort.{cohort}: { total, converted } — every auth user
+ *        starts anonymous (created on first visit); having an email means the
+ *        account was linked, i.e. the visitor converted.
+ *      Docs for past months stop being written and are frozen history.
+ *
+ * Anonymous accounts (no email) are visitors, not users: they only count in
+ * the conversion funnel denominator, never in DAU, the layer cake, or task
+ * counts. If a visitor later links an email, they start being tracked from
+ * the next run — their pre-conversion daily history simply doesn't exist,
+ * but taskCount is a live aggregation so it's immediately accurate.
+ *
+ * "Active" means Auth refreshed the user's ID token during the day being
+ * closed out — the SDK does this hourly whenever the app is open.
  */
 
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getAuth, UserRecord } from "firebase-admin/auth";
 import { setGlobalOptions } from "firebase-functions";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
@@ -33,47 +50,87 @@ const CONCURRENCY = 25;
 // See src/lib/db/init.js.
 const FIRESTORE_DATABASE_ID = "schema-compliant";
 
-function todayISO(): string {
-  // YYYY-MM-DD in UTC. Change the slice/format if you want a local-day bucket.
-  return new Date().toISOString().slice(0, 10);
+// YYYY-MM-DD in UTC, `daysAgo` days before now.
+function isoDate(daysAgo = 0): string {
+  return new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
 }
 
-async function runTaskCountSnapshot(): Promise<{
+async function listAllAuthUsers(): Promise<UserRecord[]> {
+  const users: UserRecord[] = [];
+  let pageToken: string | undefined;
+  do {
+    const page = await getAuth().listUsers(1000, pageToken);
+    users.push(...page.users);
+    pageToken = page.pageToken;
+  } while (pageToken);
+  return users;
+}
+
+async function runDailySnapshot(): Promise<{
   users: number;
   totalTasks: number;
+  dau: number;
   dateISO: string;
 }> {
   const db = getFirestore(FIRESTORE_DATABASE_ID);
-  const dateISO = todayISO();
+  const dateISO = isoDate(); // task counts are a point-in-time reading, taken "today"
+  const activityDate = isoDate(1); // activity closes out the completed UTC day
+  const month = activityDate.slice(0, 7);
 
-  const usersSnap = await db.collection("users").get();
-  const userInfos = usersSnap.docs.map((d) => ({
-    uid: d.id,
-    email: (d.data().email as string | undefined) ?? null,
+  const infos = (await listAllAuthUsers()).map((u) => ({
+    uid: u.uid,
+    email: u.email ?? null,
+    cohort: new Date(u.metadata.creationTime).toISOString().slice(0, 7),
+    lastRefreshedAt: u.metadata.lastRefreshTime
+      ? new Date(u.metadata.lastRefreshTime).toISOString()
+      : null,
   }));
   logger.info(
-    `Snapshotting task counts for ${userInfos.length} users on ${dateISO}`
+    `Snapshotting ${infos.length} auth users (${infos.filter((i) => i.email).length} converted) on ${dateISO}`
   );
 
-  let totalTasks = 0;
+  const activeUids: Record<string, string> = {}; // uid -> cohort
+  const conversionByCohort: Record<string, { total: number; converted: number }> = {};
+  for (const { uid, email, cohort, lastRefreshedAt } of infos) {
+    const tally = (conversionByCohort[cohort] ??= { total: 0, converted: 0 });
+    tally.total += 1;
+    if (email) tally.converted += 1;
+    if (email && lastRefreshedAt && lastRefreshedAt.slice(0, 10) >= activityDate) {
+      activeUids[uid] = cohort;
+    }
+  }
 
-  for (let i = 0; i < userInfos.length; i += CONCURRENCY) {
-    const batch = userInfos.slice(i, i + CONCURRENCY);
+  const converted = infos.filter((info) => info.email);
+  let totalTasks = 0;
+  for (let i = 0; i < converted.length; i += CONCURRENCY) {
     const counts = await Promise.all(
-      batch.map(async ({ uid, email }) => {
-        const agg = await db
-          .collection(`users/${uid}/tasks`)
-          .count()
-          .get();
+      converted.slice(i, i + CONCURRENCY).map(async (info) => {
+        const agg = await db.collection(`users/${info.uid}/tasks`).count().get();
         const count = agg.data().count;
 
+        // Day-over-day delta ("change" in PostHog terms) vs yesterday's
+        // snapshot; null when the user has no snapshot from yesterday.
+        const yesterdaySnap = await db
+          .doc(`analytics/${info.uid}/taskCounts/${isoDate(1)}`)
+          .get();
+        const yesterdayCount = yesterdaySnap.data()?.count;
+        const taskCountChange =
+          typeof yesterdayCount === "number" ? count - yesterdayCount : null;
+
         // Idempotent: re-running the job on the same day overwrites.
-        await db.doc(`analytics/${uid}/taskCounts/${dateISO}`).set({
-          uid,
-          email,
+        await db.doc(`analytics/${info.uid}/taskCounts/${dateISO}`).set({
+          uid: info.uid,
+          email: info.email,
           dateISO,
           count,
           takenAt: FieldValue.serverTimestamp(),
+        });
+
+        await db.doc(`analytics/${info.uid}`).set({
+          ...info,
+          taskCount: count,
+          taskCountChange,
+          updatedAt: FieldValue.serverTimestamp(),
         });
 
         return count;
@@ -82,11 +139,26 @@ async function runTaskCountSnapshot(): Promise<{
     totalTasks += counts.reduce((a, b) => a + b, 0);
   }
 
-  logger.info(
-    `Snapshot complete: ${userInfos.length} users, ${totalTasks} total tasks on ${dateISO}`
+  const dau = Object.keys(activeUids).length;
+
+  // merge:true accumulates dailyActive dates and activeUids across the month
+  // instead of overwriting them.
+  await db.doc(`analyticsMonthly/${month}`).set(
+    {
+      month,
+      dailyActive: { [activityDate]: dau },
+      activeUids,
+      conversionByCohort,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
   );
 
-  return { users: userInfos.length, totalTasks, dateISO };
+  logger.info(
+    `Snapshot complete: ${converted.length} converted users, ${totalTasks} tasks, ${dau} active on ${activityDate}`
+  );
+
+  return { users: converted.length, totalTasks, dau, dateISO };
 }
 
 export const dailyTaskCountSnapshot = onSchedule(
@@ -98,7 +170,7 @@ export const dailyTaskCountSnapshot = onSchedule(
     memory: "512MiB",
   },
   async () => {
-    await runTaskCountSnapshot();
+    await runDailySnapshot();
   }
 );
 
@@ -109,7 +181,7 @@ export const runTaskCountSnapshotNow = onCall(
   },
   async () => {
     try {
-      return await runTaskCountSnapshot();
+      return await runDailySnapshot();
     } catch (err) {
       logger.error("Manual snapshot run failed", err);
       throw new HttpsError("internal", String(err));
