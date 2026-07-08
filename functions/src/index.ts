@@ -15,6 +15,9 @@
  *
  *   3. analyticsMonthly/{YYYY-MM}   (one merged write per run)
  *      - dailyActive.{date}: DAU for each day of the month
+ *      - dailyActiveByCohort.{date}.{cohort}: that day's DAU split by signup
+ *        cohort (stacked DAU chart). Days written before this field existed
+ *        have no breakdown and render as an "unknown" band.
  *      - activeUids.{uid}: cohort — distinct users active that month (layer cake)
  *      - conversionByCohort.{cohort}: { total, converted } — every auth user
  *        starts anonymous (created on first visit); having an email means the
@@ -141,12 +144,20 @@ async function runDailySnapshot(): Promise<{
 
   const dau = Object.keys(activeUids).length;
 
+  // Per-cohort breakdown of the day's actives — powers the stacked DAU chart.
+  // Counts only (not uids) so month docs stay small as users grow.
+  const dayCohortCounts: Record<string, number> = {};
+  for (const cohort of Object.values(activeUids)) {
+    dayCohortCounts[cohort] = (dayCohortCounts[cohort] ?? 0) + 1;
+  }
+
   // merge:true accumulates dailyActive dates and activeUids across the month
   // instead of overwriting them.
   await db.doc(`analyticsMonthly/${month}`).set(
     {
       month,
       dailyActive: { [activityDate]: dau },
+      dailyActiveByCohort: { [activityDate]: dayCohortCounts },
       activeUids,
       conversionByCohort,
       updatedAt: FieldValue.serverTimestamp(),
