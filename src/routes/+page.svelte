@@ -18,16 +18,15 @@
 <div class="p-4 space-y-6 text-[15px] text-neutral-900">
   <!-- <Analytics /> -->
 
-  <!-- 2-column quadrant grid: CohortAnalytics renders as display:contents, so
-       its layer-cake and conversion subsections flow in as their own cells. -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6 items-start">
+  <!-- 3-column grid: CohortAnalytics renders as display:contents, so its
+       layer-cake and conversion subsections flow in as their own cells,
+       sharing one row with DailyActiveUsers. -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-6 items-start">
     <DailyActiveUsers />
     <CohortAnalytics />
   </div>
 
   <UserInspector />
-
-  <ErrorLogs />
 
   <section class="space-y-2">
     <h1 class="text-lg font-semibold tracking-tight">Database migration principles</h1>
@@ -72,4 +71,6 @@
       Fix and migrate templates
     </button>
   </div>
+
+  <ErrorLogs />
 </div>

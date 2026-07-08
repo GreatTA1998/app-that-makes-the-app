@@ -174,6 +174,32 @@ export const dailyTaskCountSnapshot = onSchedule(
   }
 );
 
+// Re-copies each converted user's current Auth lastRefreshTime into their
+// analytics profile doc, touching nothing else. The daily snapshot leaves
+// lastRefreshedAt up to a day stale (frozen at 00:00 UTC); unlike
+// runTaskCountSnapshotNow, this refreshes activity without overwriting
+// today's task counts with a partial mid-day reading.
+export const refreshLastActive = onCall(async () => {
+  const db = getFirestore(FIRESTORE_DATABASE_ID);
+  const writer = db.bulkWriter();
+  let updated = 0;
+  for (const u of await listAllAuthUsers()) {
+    if (!u.email || !u.metadata.lastRefreshTime) continue;
+    writer.set(
+      db.doc(`analytics/${u.uid}`),
+      {
+        lastRefreshedAt: new Date(u.metadata.lastRefreshTime).toISOString(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    updated += 1;
+  }
+  await writer.close();
+  logger.info(`Refreshed lastRefreshedAt for ${updated} users`);
+  return { updated };
+});
+
 export const runTaskCountSnapshotNow = onCall(
   {
     timeoutSeconds: 540,

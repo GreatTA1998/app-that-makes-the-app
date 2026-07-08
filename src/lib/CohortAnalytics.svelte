@@ -69,8 +69,22 @@
     [...new Set(months.flatMap((m) => Object.values(m.activeUids ?? {})))].sort()
   )
 
+  // Curated categorical palette (Tailwind 500s): hues spread across the wheel
+  // but at matched saturation/lightness, so segments read as one family
+  // instead of raw HSL hue rotation.
+  const palette = [
+    '#6366f1', // indigo
+    '#14b8a6', // teal
+    '#f59e0b', // amber
+    '#f43f5e', // rose
+    '#0ea5e9', // sky
+    '#10b981', // emerald
+    '#a855f7', // purple
+    '#f97316', // orange
+  ]
+
   function cohortColor (cohort: string) {
-    return `hsl(${(cohorts.indexOf(cohort) * 67) % 360} 65% 55%)`
+    return palette[cohorts.indexOf(cohort) % palette.length]
   }
 
   // Layer cake: distinct active users per cohort, per month.
@@ -84,6 +98,9 @@
     })
   )
   const maxCakeTotal = $derived(Math.max(1, ...cake.map((c) => c.total)))
+  // Fixed height per user (capped so large counts still fit the 160px chart),
+  // so a month with 2 users renders as a small sliver instead of a full column.
+  const pxPerUser = $derived(Math.min(10, 160 / maxCakeTotal))
 
   // Conversion: each cohort is read from its own month doc, so the number is
   // frozen at that month's end (late converters are intentionally ignored).
@@ -108,12 +125,12 @@
     </p>
   {:else}
     <div class="space-y-1 min-w-0">
-      <h2 class="font-medium text-neutral-700">Layer cake — monthly actives by signup cohort</h2>
+      <h2 class="font-medium text-neutral-700">Cohort retention</h2>
       <div class="flex items-start gap-4">
         <div class="space-y-1 shrink-0">
           <div class="flex items-end gap-2 h-40">
             {#each cake as c (c.month)}
-              <div class="flex flex-col-reverse w-12" style:height="{(c.total / maxCakeTotal) * 100}%">
+              <div class="flex flex-col-reverse w-12" style:height="{c.total * pxPerUser}px">
                 {#each cohorts as cohort (cohort)}
                   {#if c.counts[cohort]}
                     <button
@@ -156,9 +173,9 @@
           <div class="w-fit min-w-0 border border-neutral-200 rounded-md bg-white p-2 space-y-1">
             <div class="flex items-center gap-2 text-[13px]">
               <span class="w-3 h-3 rounded-sm inline-block" style:background={cohortColor(selected.cohort)}></span>
-              <span class="font-medium">Cohort {selected.cohort}</span>
+              <!-- <span class="font-medium">Cohort {selected.cohort}</span> -->
               <span class="text-neutral-500">
-                {cohortMembers.length} active {selected.month ? `in ${selected.month}` : 'across all months shown'}
+                {cohortMembers.length} active {selected.month ? `in ${selected.month}` : ''}
               </span>
             </div>
             {#if cohortMembers.length === 0}
@@ -180,7 +197,7 @@
       <table class="border-collapse font-mono text-[14px] tabular-nums">
         <thead>
           <tr>
-            {#each ['Cohort', 'Visitors', 'Converted', 'Rate'] as h (h)}
+            {#each ['Cohort', 'Visits', 'Sign-ups', 'Rate'] as h (h)}
               <th class="px-2 py-0.5 text-left font-medium text-neutral-500 bg-neutral-50 border-b border-neutral-200">{h}</th>
             {/each}
           </tr>
