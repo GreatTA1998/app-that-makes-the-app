@@ -23,13 +23,36 @@
     return nf * 10 ** exp
   }
 
-  const maxCount = $derived(Math.max(1, ...series.map((d) => d.count)))
-  // ~3 gridlines above zero; integer steps since we're counting users.
-  const step = $derived(Math.max(1, niceCeil(maxCount / 3)))
-  const yMax = $derived(Math.ceil(maxCount / step) * step)
+  // Compact x-axis labels (year is shown in the parent subtitle).
+  function formatAxisDate (date: string): string {
+    const day = date.slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return date
+    const d = new Date(`${day}T00:00:00Z`)
+    if (Number.isNaN(d.getTime())) return date
+    return d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    })
+  }
+
+  // Include 0 so all-positive series keep a baseline at zero, and signed
+  // deltas (e.g. task change / day) can dip below the axis.
+  const dataMax = $derived(Math.max(0, ...series.map((d) => d.count)))
+  const dataMin = $derived(Math.min(0, ...series.map((d) => d.count)))
+  // ~3 gridlines across the span; integer steps since we're counting.
+  const step = $derived(Math.max(1, niceCeil(Math.max(dataMax - dataMin, 1) / 3)))
+  const yMax = $derived.by(() => {
+    const max = Math.ceil(dataMax / step) * step
+    const min = Math.floor(dataMin / step) * step
+    // Avoid a zero-height plot when every point is 0.
+    return max === min ? max + step : max
+  })
+  const yMin = $derived(Math.floor(dataMin / step) * step)
   const ticks = $derived(
-    Array.from({ length: yMax / step + 1 }, (_, i) => i * step)
+    Array.from({ length: (yMax - yMin) / step + 1 }, (_, i) => yMin + i * step)
   )
+  const zeroY = $derived(yFor(0))
 
   // Width follows the data: ~32px per day, clamped so sparse data renders as
   // a compact sparkline instead of stretching across the page.
@@ -44,7 +67,7 @@
   const plotW = $derived(chartW - PAD_LEFT - PAD_RIGHT)
 
   function yFor (count: number): number {
-    return BASELINE - (count / yMax) * (BASELINE - PAD_TOP)
+    return BASELINE - ((count - yMin) / (yMax - yMin)) * (BASELINE - PAD_TOP)
   }
 
   const points = $derived(
@@ -58,12 +81,13 @@
     }))
   )
   const line = $derived(points.map((p) => `${p.x},${p.y}`).join(' '))
+  // Fill to the zero line so negative deltas shade below the axis.
   const area = $derived(
     points.length > 1
       ? [
-          `M ${points[0].x},${BASELINE}`,
+          `M ${points[0].x},${zeroY}`,
           ...points.map((p) => `L ${p.x},${p.y}`),
-          `L ${points[points.length - 1].x},${BASELINE}`,
+          `L ${points[points.length - 1].x},${zeroY}`,
           'Z',
         ].join(' ')
       : ''
@@ -136,7 +160,7 @@
         text-anchor="middle"
         class="fill-neutral-400 font-mono text-[11px]"
       >
-        {points[0].date}
+        {formatAxisDate(points[0].date)}
       </text>
     {:else if points.length > 1}
       <text
@@ -145,7 +169,7 @@
         text-anchor="start"
         class="fill-neutral-400 font-mono text-[11px]"
       >
-        {points[0].date}
+        {formatAxisDate(points[0].date)}
       </text>
       <text
         x={chartW - PAD_RIGHT}
@@ -153,7 +177,7 @@
         text-anchor="end"
         class="fill-neutral-400 font-mono text-[11px]"
       >
-        {points[points.length - 1].date}
+        {formatAxisDate(points[points.length - 1].date)}
       </text>
     {/if}
 

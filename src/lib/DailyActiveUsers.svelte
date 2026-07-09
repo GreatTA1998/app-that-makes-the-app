@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { getFirestoreCollection } from '$lib/db/helpers.js'
+  import MetricInfo from '$lib/MetricInfo.svelte'
   import TrendChart from '$lib/TrendChart.svelte'
 
   // One doc per month, written incrementally by the daily snapshot function.
@@ -53,7 +54,13 @@
 </script>
 
 <section class="space-y-1">
-  <h2 class="font-medium text-neutral-700">Daily active users</h2>
+  <div class="flex items-center gap-1.5">
+    <h2 class="font-medium text-neutral-700">Daily active users</h2>
+    <MetricInfo>
+      <p>Users who refreshed an Auth token that UTC day.</p>
+      <p class="mt-1">Nightly snapshot closes the previous UTC day.</p>
+    </MetricInfo>
+  </div>
 
   {#if loading}
     <p class="text-[15px] text-neutral-500">Loading…</p>
@@ -65,25 +72,30 @@
     </p>
   {:else}
     {#if latest}
-      <div class="flex items-baseline gap-2">
-        <span class="text-4xl font-semibold tabular-nums tracking-tight">{latest.count}</span>
+      <div class="flex items-end gap-3">
+        <div class="leading-none">
+          <span class="text-4xl font-semibold tabular-nums tracking-tight">{latest.count}</span>
+          <div class="mt-1 font-mono text-[13px] text-neutral-600">{latest.date} · UTC</div>
+        </div>
         {#if momDelta !== null}
           <span
-            class="text-[13px] font-mono {momDelta >= 0 ? 'text-green-700' : 'text-red-600'}"
+            class="pb-0.5 text-[12px] font-mono text-neutral-400"
             title="Distinct active users this month vs last month (current month is partial)"
           >
-            {momDelta >= 0 ? '+' : ''}{momDelta}{#if momPct !== null}
-              ({momPct >= 0 ? '+' : ''}{momPct.toFixed(1)}%){/if} actives MoM
+            <span class={momDelta >= 0 ? 'text-green-700/80' : 'text-red-600/80'}>
+              {momDelta >= 0 ? '+' : ''}{momDelta}{#if momPct !== null}
+                ({momPct >= 0 ? '+' : ''}{momPct.toFixed(1)}%){/if}
+            </span>
+            actives MoM
           </span>
         {:else}
           <span
-            class="text-[13px] font-mono text-neutral-400"
+            class="pb-0.5 text-[12px] font-mono text-neutral-400"
             title="Needs two months of snapshot data to compare"
           >
             — (—%) actives MoM
           </span>
         {/if}
-        <span class="text-[13px] text-neutral-500 font-mono">on {latest.date}</span>
       </div>
     {/if}
     <TrendChart series={dau} ariaLabel="Daily active users over time" />

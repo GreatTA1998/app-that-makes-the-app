@@ -108,9 +108,14 @@
   async function loadTaskSeries (p: Profile) {
     try {
       const docs = (await getFirestoreCollection(`/analytics/${p.uid}/taskCounts`)) as TaskCountDoc[]
-      const series = docs
+      const totals = docs
         .map((d) => ({ date: d.dateISO, count: d.count }))
         .sort((a, b) => a.date.localeCompare(b.date))
+      // Day-over-day delta; first snapshot has no prior day to diff against.
+      const series = totals.slice(1).map((d, i) => ({
+        date: d.date,
+        count: d.count - totals[i].count,
+      }))
       // A later click may have superseded this request.
       if (selected?.uid === p.uid) taskSeries = series
     } finally {
@@ -213,8 +218,15 @@
         <table class="border-separate border-spacing-0 font-mono text-[14px] tabular-nums">
           <thead>
             <tr>
-              {#each [['User', 'text-left'], ['Active', 'text-right'], ['Tasks', 'text-right'], ['Δ 1d', 'text-right'], ['Cohort', 'text-right']] as [h, align] (h)}
-                <th class="sticky top-0 z-10 px-2 py-1 {align} font-medium text-neutral-500 bg-neutral-50 border-b border-neutral-200">{h}</th>
+              {#each [
+                ['User', 'text-left', undefined],
+                ['Active', 'text-right', 'Calendar day in your local timezone'],
+                ['Δ 1d', 'text-right', undefined],
+              ] as [h, align, tip] (h)}
+                <th
+                  class="sticky top-0 z-10 px-2 py-1 {align} font-medium text-neutral-500 bg-neutral-50 border-b border-neutral-200"
+                  title={tip}
+                >{h}</th>
               {/each}
             </tr>
           </thead>
@@ -228,12 +240,10 @@
                   <div class="max-w-64 truncate" title={p.email ?? p.uid}>{p.email ?? p.uid}</div>
                 </td>
                 <td class="px-2 py-1 whitespace-nowrap text-right border-b border-neutral-100" title={p.lastRefreshedAt}>{ago(p.lastRefreshedAt)}</td>
-                <td class="px-2 py-1 text-right border-b border-neutral-100">{p.taskCount}</td>
                 <td
                   class="px-2 py-1 text-right border-b border-neutral-100 {(p.taskCountChange ?? 0) > 0 ? 'text-emerald-600' : (p.taskCountChange ?? 0) < 0 ? 'text-red-600' : 'text-neutral-400'}"
                   title="Tasks changed since yesterday's snapshot"
                 >{delta(p.taskCountChange)}</td>
-                <td class="px-2 py-1 text-right border-b border-neutral-100">{p.cohort}</td>
               </tr>
             {/each}
           </tbody>
@@ -248,15 +258,17 @@
                 <div class="break-all"><span class="text-neutral-500">uid:</span> {selected.uid}</div>
                 <div class="break-all"><span class="text-neutral-500">email:</span> {selected.email ?? '(anonymous)'}</div>
                 <div><span class="text-neutral-500">lastRefreshedAt:</span> {selected.lastRefreshedAt ?? 'never'}</div>
+                <div><span class="text-neutral-500">taskCount:</span> {selected.taskCount}</div>
+                <div><span class="text-neutral-500">cohort:</span> {selected.cohort}</div>
               </div>
 
-              <h2 class="font-medium text-neutral-700">Tasks over time</h2>
+              <h2 class="font-medium text-neutral-700">Daily task change</h2>
               {#if taskSeriesLoading}
                 <p class="text-[15px] text-neutral-500">Loading…</p>
               {:else if taskSeries.length === 0}
-                <p class="text-[15px] text-neutral-500">No daily snapshots yet for this user.</p>
+                <p class="text-[15px] text-neutral-500">Need at least two daily snapshots to chart change.</p>
               {:else}
-                <TrendChart series={taskSeries} ariaLabel="Total tasks over time for {selected.email ?? selected.uid}" />
+                <TrendChart series={taskSeries} ariaLabel="Daily task change for {selected.email ?? selected.uid}" />
               {/if}
             </div>
 
