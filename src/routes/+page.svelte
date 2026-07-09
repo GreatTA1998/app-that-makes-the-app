@@ -18,11 +18,8 @@
 <div class="p-4 space-y-6 text-[15px] text-neutral-900">
   <!-- <Analytics /> -->
 
-  <!-- 3-column grid: CohortAnalytics renders as display:contents, so its
-       layer-cake and conversion subsections flow in as their own cells,
-       sharing one row with DailyActiveUsers. -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-6 items-start">
-    <DailyActiveUsers />
+    <div class="lg:col-span-2"><DailyActiveUsers /></div>
     <CohortAnalytics />
   </div>
 

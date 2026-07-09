@@ -14,8 +14,8 @@
  *      Converted users only.
  *
  *   3. analyticsMonthly/{YYYY-MM}   (one merged write per run)
- *      - dailyActive.{date}: DAU for each day of the month
- *      - activeUids.{uid}: cohort — distinct users active that month (layer cake)
+ *      - dailyActiveUids.{date}.{uid}: cohort — who was active each day.
+ *        DAU and monthly distinct actives are derived client-side.
  *      - conversionByCohort.{cohort}: { total, converted } — every auth user
  *        starts anonymous (created on first visit); having an email means the
  *        account was linked, i.e. the visitor converted.
@@ -141,13 +141,12 @@ async function runDailySnapshot(): Promise<{
 
   const dau = Object.keys(activeUids).length;
 
-  // merge:true accumulates dailyActive dates and activeUids across the month
+  // merge:true accumulates dailyActiveUids dates across the month
   // instead of overwriting them.
   await db.doc(`analyticsMonthly/${month}`).set(
     {
       month,
-      dailyActive: { [activityDate]: dau },
-      activeUids,
+      dailyActiveUids: { [activityDate]: activeUids },
       conversionByCohort,
       updatedAt: FieldValue.serverTimestamp(),
     },
